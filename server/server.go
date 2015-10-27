@@ -165,6 +165,20 @@ func getVersion(eng *engine.Engine, version version.Version, w http.ResponseWrit
 	return nil
 }
 
+func getCheckpoint(eng *engine.Engine,version version.Version,w http.ResponseWriter,r *http.Request,vars map[string]string) error{
+	if err:=r.ParseForm(); err!=nil {
+		return nil
+	}
+	
+	fmt.Println("I'm in server.go getCheckpoint")
+	job:=eng.Job("checkPoint",r.Form.Get("podId"))
+
+	if err:=job.Run(); err!=nil {
+		fmt.Println("cant run job")
+	}
+	return nil
+}
+
 func getInfo(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	w.Header().Set("Content-Type", "application/json")
 	eng.ServeHTTP(w, r)
@@ -671,6 +685,7 @@ func createRouter(eng *engine.Engine, logging, enableCors bool, corsHeaders stri
 			"/pod/info": getPodInfo,
 			"/version":  getVersion,
 			"/list":     getList,
+			"/checkpoint": getCheckpoint,
 		},
 		"POST": {
 			"/container/create": postContainerCreate,

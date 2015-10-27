@@ -47,6 +47,8 @@ type DriverContext interface {
 
 	Shutdown(ctx *VmContext)
 	Kill(ctx *VmContext)
+	
+	CheckPoint(ctx *VmContext)
 
 	BuildinNetwork() bool
 	Close()
@@ -89,6 +91,8 @@ func (ec *EmptyContext) AddNic(ctx *VmContext, host *HostNicInfo, guest *GuestNi
 func (ec *EmptyContext) RemoveNic(ctx *VmContext, device, mac string, callback VmEvent) {}
 
 func (ec *EmptyContext) Shutdown(ctx *VmContext) {}
+
+func (ec *EmptyContext) CheckPoint(ctx *VmContext) {}
 
 func (ec *EmptyContext) Kill(ctx *VmContext) {}
 

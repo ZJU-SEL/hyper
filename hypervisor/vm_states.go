@@ -397,6 +397,9 @@ func stateRunning(ctx *VmContext, ev VmEvent) {
 		ctx.Become(stateTerminating, "TERMINATING")
 	} else {
 		switch ev.Event() {
+		case COMMAND_CHECKPOINT:
+			fmt.Println("Now in Vm_state StateRunning")
+			ctx.DCtx.CheckPoint(ctx)
 		case COMMAND_STOP_POD:
 			ctx.stopPod()
 			ctx.Become(statePodStopping, "STOPPING")

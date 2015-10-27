@@ -15,6 +15,18 @@ func qmpQemuQuit(qc *QemuContext) {
 	qc.qmp <- &QmpSession{commands: commands, callback: nil}
 }
 
+func createSnapShot(qc *QemuContext) {
+	commands:=[]*QmpCommand{
+		&QmpCommand{
+			Execute:"human-monitor-command",
+			Arguments:map[string]interface{}{
+				"command-line":"savevm vm_old",
+			},
+		},
+	}
+	qc.qmp<-&QmpSession{commands:commands, callback: nil}
+}
+
 func scsiId2Name(id int) string {
 	return "sd" + hypervisor.DiskId2Name(id)
 }

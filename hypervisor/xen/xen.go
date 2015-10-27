@@ -188,6 +188,10 @@ func (xc *XenContext) Shutdown(ctx *hypervisor.VmContext) {
 	}()
 }
 
+func (xc *XenContext) CheckPoint(ctx *hypervisor.VmContext) {
+
+}
+
 func (xc *XenContext) Kill(ctx *hypervisor.VmContext) {
 	go func() {
 		res := HyperxlDomainDestroy(xc.driver.Ctx, (uint32)(xc.domId))

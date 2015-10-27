@@ -120,6 +120,10 @@ func (qc *QemuContext) Shutdown(ctx *hypervisor.VmContext) {
 	qmpQemuQuit(qc)
 }
 
+func (qc *QemuContext) CheckPoint(ctx *hypervisor.VmContext) {
+	createSnapShot(qc)
+}
+
 func (qc *QemuContext) Kill(ctx *hypervisor.VmContext) {
 	defer func() {
 		err := recover()
@@ -189,7 +193,7 @@ func (qc *QemuContext) arguments(ctx *hypervisor.VmContext) []string {
 	}
 
 	return append(params,
-		"-realtime", "mlock=off", "-no-user-config", "-nodefaults", "-no-hpet",
+		"-realtime", "mlock=off", "-no-user-config", "-nodefaults","-no-hpet",
 		"-rtc", "base=utc,driftfix=slew", "-no-reboot", "-display", "none", "-boot", "strict=on",
 		"-m", strconv.Itoa(ctx.Boot.Memory), "-smp", strconv.Itoa(ctx.Boot.CPU),
 		"-qmp", fmt.Sprintf("unix:%s,server,nowait", qc.qmpSockName), "-serial", fmt.Sprintf("unix:%s,server,nowait", ctx.ConsoleSockName),

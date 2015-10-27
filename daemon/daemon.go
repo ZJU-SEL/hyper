@@ -101,6 +101,7 @@ func (daemon *Daemon) Install(eng *engine.Engine) error {
 		"exec":              daemon.CmdExec,
 		"attach":            daemon.CmdAttach,
 		"tty":               daemon.CmdTty,
+		"checkPoint":	     daemon.checkPoint,
 		"serveapi":          apiserver.ServeApi,
 		"acceptconnections": apiserver.AcceptConnections,
 	} {

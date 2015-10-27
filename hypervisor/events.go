@@ -55,6 +55,9 @@ type StopPodCommand struct{}
 type ShutdownCommand struct {
 	Wait bool
 }
+
+type CheckPoint struct{}
+
 type ReleaseVMCommand struct{}
 
 type AttachCommand struct {
@@ -181,6 +184,7 @@ type Interrupted struct {
 	Reason string
 }
 
+func (qe *CheckPoint) Event() int 	     { return COMMAND_CHECKPOINT }
 func (qe *VmStartFailEvent) Event() int      { return EVENT_VM_START_FAILED }
 func (qe *VmExit) Event() int                { return EVENT_VM_EXIT }
 func (qe *VmKilledEvent) Event() int         { return EVENT_VM_KILL }
