@@ -19,8 +19,9 @@ func createSnapShot(qc *QemuContext) {
 	commands:=[]*QmpCommand{
 		&QmpCommand{
 			Execute:"human-monitor-command",
+            //FIXME vm_old should be replaced by Pod ID or something similar
 			Arguments:map[string]interface{}{
-				"command-line":"savevm vm_old",
+				"command-line":"hahasavevm vm_old",
 			},
 		},
 	}
