@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"os"
 	"path"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	dockertypes "github.com/hyperhq/hyper/lib/docker/api/types"
@@ -143,6 +145,45 @@ func (dms *DevMapperStorage) Init() error {
 
 	// Prepare the DeviceMapper storage
 	return dm.CreatePool(&dmPool)
+}
+
+func (dms *DevMapperStorage) Restore(shareDir, podContainers string) error {
+	glog.V(1).Infof("Prepare to restore storage image from migration")
+	tmpStr := utils.RandStr(10, "alpha")
+	tmpDir := path.Join("/tmp", tmpStr)
+	err := os.Mkdir(tmpDir, 0600)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpDir)
+	err = utils.MountNFSShareDir(shareDir, tmpDir)
+	if err != nil {
+		return err
+	}
+	glog.V(1).Infof("Mounted shareDir to %s", tmpDir)
+	defer syscall.Unmount(tmpDir, syscall.MNT_DETACH)
+	dmPool := &dm.DeviceMapper{
+		Datafile:     path.Join(tmpDir, "data"),
+		Metadatafile: path.Join(tmpDir, "metadata"),
+		PoolName:     tmpStr + "-pool",
+		Size:         1024 * 1024 * 1024 * 100,
+	}
+	tmpDms := &DevMapperStorage{
+		DmPoolData: dmPool,
+	}
+	err = dm.RestorePool(dmPool)
+	if err != nil {
+		return err
+	}
+	defer tmpDms.CleanUp()
+	cIdList := strings.Split(podContainers, ":")
+	for _, cId := range cIdList {
+		err = dm.RestoreDevice(dmPool, cId, dms.DevPrefix, dms.RootPath())
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (dms *DevMapperStorage) CleanUp() error {

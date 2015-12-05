@@ -1,12 +1,13 @@
 package daemon
 
 import (
-	"fmt"
-	"github.com/hyperhq/hyper/engine"
-	"github.com/hyperhq/runv/hypervisor"
-	"github.com/hyperhq/runv/lib/glog"
+//	"fmt"
+//	"github.com/hyperhq/hyper/engine"
+///	"github.com/hyperhq/runv/hypervisor"
+//	"github.com/hyperhq/runv/lib/glog"
 )
 
+/*
 func (daemon *Daemon) CmdVmRestore(job *engine.Job) error {
 	if len(job.Args) == 0 {
 		return fmt.Errorf("Can not execute 'checkpoint' command without")
@@ -40,3 +41,4 @@ func (daemon *Daemon) CmdVmRestore(job *engine.Job) error {
 
 	return nil
 }
+*/

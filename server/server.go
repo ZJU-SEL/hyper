@@ -670,13 +670,13 @@ func postPodRun(eng *engine.Engine, version version.Version, w http.ResponseWrit
 	return writeJSONEnv(w, http.StatusOK, env)
 }
 
-func postVmMigrate(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+func postPodMigrate(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
 	if err := r.ParseForm(); err != nil {
 		return nil
 	}
 
-	glog.V(1).Infof("Migrate the POD ID is %s, targetIP is %s", r.Form.Get("podId"), r.Form.Get("targetIP"))
-	job := eng.Job("vmMigrate", r.Form.Get("podId"), r.Form.Get("targetIP"))
+	glog.V(1).Infof("Migrate the POD ID is %s, desAddr is %s\n", r.Form.Get("podId"), r.Form.Get("desAddr"))
+	job := eng.Job("podMigrate", r.Form.Get("podId"), r.Form.Get("desAddr"))
 	stdoutBuf := bytes.NewBuffer(nil)
 	job.Stdout.Add(stdoutBuf)
 
@@ -695,6 +695,69 @@ func postVmMigrate(eng *engine.Engine, version version.Version, w http.ResponseW
 	}
 
 	env.Set("ID", dat["ID"].(string))
+	env.SetInt("Code", (int)(dat["Code"].(float64)))
+	env.Set("Cause", dat["Cause"].(string))
+
+	return writeJSONEnv(w, http.StatusOK, env)
+}
+
+func postPodRestore(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	if err := r.ParseForm(); err != nil {
+		return nil
+	}
+
+	glog.V(1).Infof("Restore the pod data is %s\n shareType is %s, shareList is %s\n", r.Form.Get("migrateData"), r.Form.Get("shareType"), r.Form["shareList"])
+	//FIXME should transfer all of the shareList
+	job := eng.Job("podRestore", r.Form.Get("migrateData"), r.Form.Get("shareType"), r.Form["shareList"][0])
+	stdoutBuf := bytes.NewBuffer(nil)
+	job.Stdout.Add(stdoutBuf)
+
+	if err := job.Run(); err != nil {
+		return err
+	}
+
+	var (
+		env             engine.Env
+		dat             map[string]interface{}
+		returnedJSONstr string
+	)
+	returnedJSONstr = engine.Tail(stdoutBuf, 1)
+	if err := json.Unmarshal([]byte(returnedJSONstr), &dat); err != nil {
+		return err
+	}
+
+	//env.Set("ID", dat["ID"].(string))
+	env.SetInt("Code", (int)(dat["Code"].(float64)))
+	env.Set("Cause", dat["Cause"].(string))
+
+	return writeJSONEnv(w, http.StatusOK, env)
+}
+
+func postVmMigrate(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	if err := r.ParseForm(); err != nil {
+		return nil
+	}
+
+	glog.V(1).Infof("Migrate the POD ID is %s, targetAddr is %s\n", r.Form.Get("podId"), r.Form.Get("desAddr"))
+	job := eng.Job("vmMigrate", r.Form.Get("podId"), r.Form.Get("desAddr"))
+	stdoutBuf := bytes.NewBuffer(nil)
+	job.Stdout.Add(stdoutBuf)
+
+	if err := job.Run(); err != nil {
+		return err
+	}
+
+	var (
+		env             engine.Env
+		dat             map[string]interface{}
+		returnedJSONstr string
+	)
+	returnedJSONstr = engine.Tail(stdoutBuf, 1)
+	if err := json.Unmarshal([]byte(returnedJSONstr), &dat); err != nil {
+		return err
+	}
+
+	//env.Set("ID", dat["ID"].(string))
 	env.SetInt("Code", (int)(dat["Code"].(float64)))
 	env.Set("Cause", dat["Cause"].(string))
 
@@ -737,8 +800,8 @@ func postVmRestore(eng *engine.Engine, version version.Version, w http.ResponseW
 		return nil
 	}
 
-	glog.V(1).Infof("Restore the POD ID is %s", r.Form.Get("podId"))
-	job := eng.Job("vmRestore", r.Form.Get("podId"))
+	glog.V(1).Infof("Restore the POD ID is %s, remote migration status: %s", r.Form.Get("podId"), r.Form.Get("isSuccess"))
+	job := eng.Job("vmRestore", r.Form.Get("podId"), r.Form.Get("isSuccess"))
 	stdoutBuf := bytes.NewBuffer(nil)
 	job.Stdout.Add(stdoutBuf)
 
@@ -1212,6 +1275,8 @@ func createRouter(eng *engine.Engine, logging, enableCors bool, corsHeaders stri
 			"/pod/remove":       postPodRemove,
 			"/pod/run":          postPodRun,
 			"/pod/stop":         postStop,
+			"/pod/migrate":      postPodMigrate,
+			"/pod/restore":      postPodRestore,
 			"/vm/checkpoint":    postVmCheckpoint,
 			"/vm/restore":       postVmRestore,
 			"/vm/migrate":       postVmMigrate,

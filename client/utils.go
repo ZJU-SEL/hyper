@@ -143,6 +143,11 @@ func (cli *HyperClient) clientRequestAttemptLogin(method, path string, in io.Rea
 	}
 	return body, statusCode, err
 }
+
+func (cli *HyperClient) Call(method, path string, data interface{}, headers map[string][]string) (io.ReadCloser, int, error) {
+	return cli.call(method, path, data, headers)
+}
+
 func (cli *HyperClient) call(method, path string, data interface{}, headers map[string][]string) (io.ReadCloser, int, error) {
 	params, err := cli.encodeData(data)
 	if err != nil {
@@ -189,6 +194,10 @@ func (cli *HyperClient) streamBody(body io.ReadCloser, contentType string, setRa
 		return err
 	}
 	return nil
+}
+
+func ReadBody(stream io.ReadCloser, statusCode int, err error) ([]byte, int, error) {
+	return readBody(stream, statusCode, err)
 }
 
 func readBody(stream io.ReadCloser, statusCode int, err error) ([]byte, int, error) {
