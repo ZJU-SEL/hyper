@@ -18,3 +18,8 @@ func (cli *Docker) GetContainerInfo(args ...string) (*types.ContainerJSONRaw, er
 func (cli Docker) SendContainerRename(oldName, newName string) error {
 	return cli.daemon.ContainerRename(oldName, newName)
 }
+
+//add interface to support LoadContainer
+func (cli Docker) LoadContainer(id string) error {
+	return cli.daemon.LoadContainer(id)
+}

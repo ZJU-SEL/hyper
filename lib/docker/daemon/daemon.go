@@ -226,6 +226,86 @@ func (daemon *Daemon) ensureName(container *Container) error {
 	return nil
 }
 
+func (daemon *Daemon) LoadContainer(id string) error {
+	return daemon.loadContainer(id)
+}
+
+func (daemon *Daemon) loadContainer(id string) error {
+	type cr struct {
+		container  *Container
+		registered bool
+	}
+
+	var (
+		currentDriver = daemon.driver.String()
+		containers    = make(map[string]*cr)
+	)
+
+	container, err := daemon.load(id)
+	if err != nil {
+		glog.Errorf("Failed to load container %v: %v", id, err)
+	}
+
+	fmt.Println("load container get container info is :")
+	fmt.Println(container.ID)
+	fmt.Println(container.Name)
+
+	// Ignore the container if it does not support the current driver being used by the graph
+	if (container.Driver == "" && currentDriver == "aufs") || container.Driver == currentDriver {
+		glog.V(1).Infof("Loaded container %v", container.ID)
+
+		containers[container.ID] = &cr{container: container}
+	} else {
+		glog.V(1).Infof("Cannot load container %s because it was created with another graph driver.", container.ID)
+	}
+
+	if entities := daemon.containerGraph.List("/", -1); entities != nil {
+		for _, p := range entities.Paths() {
+			e := entities[p]
+
+			if c, ok := containers[e.ID()]; ok {
+				c.registered = true
+			}
+		}
+	}
+
+	group := sync.WaitGroup{}
+	for _, c := range containers {
+		group.Add(1)
+
+		go func(container *Container, registered bool) {
+			defer group.Done()
+
+			if !registered {
+				// Try to set the default name for a container if it exists prior to links
+				container.Name, err = daemon.generateNewName(container.ID)
+				if err != nil {
+					glog.V(1).Infof("Setting default id - %s", err)
+				}
+			}
+
+			if err := daemon.register(container, false); err != nil {
+				glog.V(1).Infof("Failed to register container %s: %s", container.ID, err)
+			}
+
+			// check the restart policy on the containers and restart any container with
+			// the restart policy of "always"
+			if daemon.config.AutoRestart && container.shouldRestart() {
+				glog.V(1).Infof("Starting container %s", container.ID)
+
+				if err := container.Start(); err != nil {
+					glog.V(1).Infof("Failed to start container %s: %s", container.ID, err)
+				}
+			}
+		}(c.container, c.registered)
+	}
+	group.Wait()
+
+	glog.Info("Loading containers: done.")
+
+	return nil
+}
+
 func (daemon *Daemon) Restore() error {
 	return daemon.restore()
 }

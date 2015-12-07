@@ -9,6 +9,7 @@ import (
 	"github.com/hyperhq/hyper/engine"
 	"github.com/hyperhq/hyper/utils"
 	"github.com/hyperhq/runv/hypervisor"
+	"github.com/hyperhq/runv/hypervisor/network"
 	"github.com/hyperhq/runv/hypervisor/qemu"
 	"github.com/hyperhq/runv/hypervisor/types"
 	"github.com/hyperhq/runv/lib/glog"
@@ -433,13 +434,12 @@ func (daemon *Daemon) RestorePodData(migrateData, shareType, port string, shareL
 	glog.V(2).Infof("lock PodList")
 	defer glog.V(2).Infof("unlock PodList")
 	defer daemon.PodList.Unlock()
-	//FIXME
-	/*
-	   err = daemon.RestorePod(podId, podPackage.PodData)
-	   if err != nil{
-	       return types.E_FAILED, err.Error(), err
-	   }
-	*/
+
+	err = daemon.RestorePod(podId, podPackage.PodData)
+	if err != nil {
+		return types.E_FAILED, err.Error(), err
+	}
+
 	parmList, err := getRestoreDeviceCommands(daemon, podPackage)
 	if err != nil {
 		return types.E_FAILED, err.Error(), err
@@ -451,6 +451,18 @@ func (daemon *Daemon) RestorePodData(migrateData, shareType, port string, shareL
 		return types.E_FAILED, err.Error(), err
 	}
 	return types.E_OK, "", nil
+}
+
+func (daemon *Daemon) RestorePod(podId string, podData string) error {
+	if ids, _ := daemon.GetPodContainersByName(podId); ids != nil {
+		for _, id := range ids {
+			err := daemon.DockerCli.LoadContainer(id)
+			glog.V(1).Infof("LoadContainer info %s", id)
+		}
+	}
+
+	err := daemon.CreatePod(podId, podData, false)
+	return err
 }
 
 func (daemon *Daemon) StartQemuIncomingMode(podPackage *PodMigratePackage, parmList []string) error {
@@ -514,8 +526,9 @@ func getRestoreDeviceCommands(daemon *Daemon, podPackage *PodMigratePackage) ([]
 	//collect network device command
 	//FIXME
 	for _, netConfig := range pInfo.NetworkList {
+		_, tapfd, _ := network.AllocateTap()
 		cmdList = append(cmdList,
-			fmt.Sprintf("-netdev tap,id=eth%d,fd=%d", netConfig.Index),
+			fmt.Sprintf("-netdev tap,id=eth%d,fd=%d", netConfig.Index, tapfd),
 			fmt.Sprintf("-device virtio-net-pci,netdev=eth%d,bus=pci.0,addr=0x%d,id=eth%d", netConfig.Index, netConfig.PciAddr, netConfig.Index),
 		)
 	}

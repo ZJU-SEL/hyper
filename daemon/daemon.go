@@ -43,6 +43,7 @@ type DockerInterface interface {
 	SendContainerRename(oName, nName string) error
 	Shutdown() error
 	Setup() error
+	LoadContainer(id string) error
 }
 
 type Daemon struct {
