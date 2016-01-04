@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+    "time"
 	"github.com/hyperhq/hyper/engine"
 	"github.com/hyperhq/runv/hypervisor/types"
 	gflag "github.com/jessevdk/go-flags"
@@ -38,7 +39,8 @@ func (cli *HyperClient) HyperCmdMigrate(args ...string) error {
 	podId = args[1]
 	desAddr = args[2]
 
-	fmt.Println("Start to migrate Pod( %s )...", podId)
+	fmt.Printf("Start to transfer Pod( %s ) data to remote daemon...\n", podId)
+    startTime := time.Now().UnixNano()
 	//migrate pod data to destination daemon
 	v.Set("podId", podId)
 	v.Set("desAddr", desAddr)
@@ -59,9 +61,9 @@ func (cli *HyperClient) HyperCmdMigrate(args ...string) error {
 	if errCode != types.E_OK {
 		return fmt.Errorf("")
 	}
-	fmt.Println("Pod( %s ) data migrate successfully, wait vm migrate...", podId)
+	fmt.Printf("Transfer successfully, wait vm migrate...\n")
 
-	//if migrate pod data success, migrate vm machine to destination host
+	//if migrate pod data success, migrate vm to destination host
 	body, _, err = readBody(cli.call("POST", "/vm/migrate?"+v.Encode(), nil, nil))
 	if err != nil {
 		return err
@@ -80,5 +82,8 @@ func (cli *HyperClient) HyperCmdMigrate(args ...string) error {
 	if errCode != types.E_OK {
 		return fmt.Errorf("")
 	}
+    endTime := time.Now().UnixNano()
+    timeSpend := (endTime - startTime) / int64((time.Millisecond / time.Nanosecond))
+    fmt.Printf("Pod %s Migration Complete\nTime spend: %d milliseconds\n", podId, timeSpend)
 	return nil
 }

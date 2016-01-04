@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/hyperhq/hyper/storage"
+	"github.com/hyperhq/hyper/utils"
 	"github.com/hyperhq/runv/lib/glog"
 )
 
@@ -68,7 +69,7 @@ func CreateNewDevice(containerId, devPrefix, rootPath string) error {
 	return nil
 }
 
-func RestoreDevice(dmpool *DeviceMapper, containerId, devPrefix, rootPath string) error {
+func RestoreDevice(dmpool *DeviceMapper, containerId, devPrefix, rootPath string, isCopy bool) error {
 	var metadataPath = fmt.Sprintf("%s/metadata/", rootPath)
 	// Get device id from the metadata file
 	idMetadataFile := path.Join(metadataPath, containerId)
@@ -125,8 +126,8 @@ func RestoreDevice(dmpool *DeviceMapper, containerId, devPrefix, rootPath string
 
 	//set new device data
 	dat.Device_id = tsData.Device_id
-	deviceId = dat.Device_id
 	dat.Transaction_id = tsData.Open_transaction_id
+	deviceId = dat.Transaction_id
 
 	//create new volume
 	glog.V(1).Infof("Create new device %d to hold migration container's image", deviceId)
@@ -136,24 +137,113 @@ func RestoreDevice(dmpool *DeviceMapper, containerId, devPrefix, rootPath string
 		glog.Error(string(res))
 		return fmt.Errorf(string(res))
 	}
-	//create new snapshot device of old
-	glog.V(1).Infof("Transaction data using external snapshot")
-	devName := fmt.Sprintf("%s-%s", devPrefix, containerId)
-	parms = fmt.Sprintf("dmsetup create %s --table \"0 %d thin %s %d %s\"", devName, deviceSize/512, poolName, deviceId, path.Join("/dev/mapper/", tmpDevName))
-	if res, err := exec.Command("/bin/sh", "-c", parms).CombinedOutput(); err != nil {
-		glog.Error(string(res))
-		return fmt.Errorf(string(res))
-	}
+    if isCopy {
+        //create new device and copy data to it.
+        err = createCopyedDevice(devPrefix, containerId, tmpDevName, deviceId, deviceSize)
+    }else{
+	    //create new snapshot device of old
+        err = createExternalSnapshot(devPrefix, containerId, tmpDevName, deviceId, deviceSize)
+    }
+    if err != nil{
+        defer DeleteVolume(dmpool, deviceId)
+        return err
+    }
 	//write new data to file
 	jsonData, err = json.Marshal(dat)
 	if err != nil {
+        defer DeleteVolume(dmpool, deviceId)
 		return err
 	}
 	err = ioutil.WriteFile(idMetadataFile, jsonData, 0600)
 	if err != nil {
+        defer DeleteVolume(dmpool, deviceId)
+		return err
+	}
+    tsJsonData, err := json.Marshal(tsData)
+	if err != nil {
+        defer DeleteVolume(dmpool, deviceId)
+		return err
+	}
+	err = ioutil.WriteFile(tsMetadataFile, tsJsonData, 0600)
+	if err != nil {
+        defer DeleteVolume(dmpool, deviceId)
 		return err
 	}
 	return nil
+}
+
+func createExternalSnapshot(devPrefix, containerId, originDevName string, deviceId, deviceSize int) error{
+	glog.V(1).Infof("Transaction data using external snapshot")
+	poolName := fmt.Sprintf("/dev/mapper/%s-pool", devPrefix)
+	devName := fmt.Sprintf("%s-%s", devPrefix, containerId)
+    parms := fmt.Sprintf("dmsetup create %s --table \"0 %d thin %s %d %s\"", devName, deviceSize/512, poolName, deviceId, path.Join("/dev/mapper/", originDevName))
+	if res, err := exec.Command("/bin/sh", "-c", parms).CombinedOutput(); err != nil {
+		glog.Error(string(res))
+		return fmt.Errorf(string(res))
+	}
+    return nil
+}
+
+func createCopyedDevice(devPrefix, containerId, originDevName string, deviceId, deviceSize int) error{
+	glog.V(1).Infof("Transaction data by copy")
+	poolName := fmt.Sprintf("/dev/mapper/%s-pool", devPrefix)
+	devName := fmt.Sprintf("%s-%s", devPrefix, containerId)
+    parms := fmt.Sprintf("dmsetup create %s --table \"0 %d thin %s %d\"", devName, deviceSize/512, poolName, deviceId)
+	if res, err := exec.Command("/bin/sh", "-c", parms).CombinedOutput(); err != nil {
+		glog.Error(string(res))
+		return fmt.Errorf(string(res))
+	}
+    //mkfs to new device
+	glog.V(1).Infof("make filesystem for %s", devName)
+	parms = fmt.Sprintf("mkfs.ext4 /dev/mapper/%s", devName)
+	if res, err := exec.Command("/bin/sh", "-c", parms).CombinedOutput(); err != nil {
+		glog.Error(string(res))
+		return fmt.Errorf(string(res))
+	}
+    // Mount block device to tmp mount point
+	glog.V(1).Infof("mount device to temp directory")
+    tmpStr := utils.RandStr(10, "alpha")
+    sourceDir := fmt.Sprintf("/tmp/%s-source", tmpStr)
+    if err := os.Mkdir(sourceDir, 0644); err != nil{
+        return err
+    }
+    defer os.Remove(sourceDir)
+    sourceDevPath := fmt.Sprintf("/dev/mapper/%s", originDevName)
+    targetDir := fmt.Sprintf("/tmp/%s-target", tmpStr)
+    if err := os.Mkdir(targetDir, 0644); err != nil{
+        return err
+    }
+    defer os.Remove(sourceDir)
+    targetDevPath := fmt.Sprintf("/dev/mapper/%s", devName)
+    var flags uintptr = syscall.MS_MGC_VAL
+    options := ""
+    fstype := "ext4"
+    err := syscall.Mount(sourceDevPath, sourceDir, fstype, flags, joinMountOptions("discard", options))
+	if err != nil && err == syscall.EINVAL {
+		err = syscall.Mount(sourceDevPath, sourceDir, fstype, flags, options)
+	}
+	if err != nil {
+		return fmt.Errorf("Error mounting '%s' on '%s': %s", sourceDevPath, sourceDir, err)
+	}
+	defer syscall.Unmount(sourceDir, syscall.MNT_DETACH)
+    
+	err = syscall.Mount(targetDevPath, targetDir, fstype, flags, joinMountOptions("discard", options))
+	if err != nil && err == syscall.EINVAL {
+		err = syscall.Mount(targetDevPath, targetDir, fstype, flags, options)
+	}
+	if err != nil {
+		return fmt.Errorf("Error mounting '%s' on '%s': %s", targetDevPath, targetDir, err)
+	}
+	defer syscall.Unmount(targetDir, syscall.MNT_DETACH)
+    // Begin copy data from source device to local target device
+	glog.V(1).Infof("Start copying data from %s to %s", sourceDir, targetDir)
+	parms = fmt.Sprintf("cp -r %s/* %s", sourceDir, targetDir)
+	if res, err := exec.Command("/bin/sh", "-c", parms).CombinedOutput(); err != nil {
+		glog.Error(string(res))
+		return fmt.Errorf(string(res))
+	}
+	glog.V(1).Infof("Copy data finished")
+    return nil
 }
 
 func InjectFile(src io.Reader, containerId, devPrefix, target, rootPath string, perm, uid, gid int) error {
@@ -418,17 +508,20 @@ func DeleteVolume(dm *DeviceMapper, dev_id int) error {
 func DMCleanup(dm *DeviceMapper) error {
 	var parms string
 	// Delete the thin pool for test
+    glog.V(1).Infof("Clean devicemapper device %s", dm.PoolName)
 	parms = fmt.Sprintf("dmsetup remove \"/dev/mapper/%s\"", dm.PoolName)
 	if res, err := exec.Command("/bin/sh", "-c", parms).CombinedOutput(); err != nil {
 		glog.Error(string(res))
 		return fmt.Errorf(string(res))
 	}
 	// Delete the loop device
+    glog.V(1).Infof("Clean loopback device %s", dm.MetadataLoopFile)
 	parms = fmt.Sprintf("losetup -d %s", dm.MetadataLoopFile)
 	if res, err := exec.Command("/bin/sh", "-c", parms).CombinedOutput(); err != nil {
 		glog.Error(string(res))
 		return fmt.Errorf(string(res))
 	}
+    glog.V(1).Infof("Clean loopback device %s", dm.DataLoopFile)
 	parms = fmt.Sprintf("losetup -d %s", dm.DataLoopFile)
 	if res, err := exec.Command("/bin/sh", "-c", parms).CombinedOutput(); err != nil {
 		glog.Error(string(res))

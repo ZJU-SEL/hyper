@@ -172,13 +172,13 @@ func (dms *DevMapperStorage) Restore(shareDir, podContainers string) error {
 		DmPoolData: dmPool,
 	}
 	err = dm.RestorePool(dmPool)
+	defer tmpDms.CleanUp()
 	if err != nil {
 		return err
 	}
-	defer tmpDms.CleanUp()
 	cIdList := strings.Split(podContainers, ":")
 	for _, cId := range cIdList {
-		err = dm.RestoreDevice(dmPool, cId, dms.DevPrefix, dms.RootPath())
+		err = dm.RestoreDevice(dmPool, cId, dms.DevPrefix, dms.RootPath(), false)
 		if err != nil {
 			return err
 		}

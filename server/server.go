@@ -708,7 +708,7 @@ func postPodRestore(eng *engine.Engine, version version.Version, w http.Response
 
 	glog.V(1).Infof("Restore the pod data is %s\n shareType is %s, shareList is %s\n", r.Form.Get("migrateData"), r.Form.Get("shareType"), r.Form["shareList"])
 	//FIXME should transfer all of the shareList
-	job := eng.Job("podRestore", r.Form.Get("migrateData"), r.Form.Get("shareType"), r.Form["shareList"][0])
+	job := eng.Job("podRestore", r.Form.Get("migrateData"), r.Form.Get("port"), r.Form.Get("shareType"), r.Form["shareList"][0])
 	stdoutBuf := bytes.NewBuffer(nil)
 	job.Stdout.Add(stdoutBuf)
 
@@ -758,37 +758,6 @@ func postVmMigrate(eng *engine.Engine, version version.Version, w http.ResponseW
 	}
 
 	//env.Set("ID", dat["ID"].(string))
-	env.SetInt("Code", (int)(dat["Code"].(float64)))
-	env.Set("Cause", dat["Cause"].(string))
-
-	return writeJSONEnv(w, http.StatusOK, env)
-}
-
-func postVmCheckpoint(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
-	if err := r.ParseForm(); err != nil {
-		return nil
-	}
-
-	glog.V(1).Infof("Checkpoint the POD ID is %s", r.Form.Get("podId"))
-	job := eng.Job("vmCheckpoint", r.Form.Get("podId"))
-	stdoutBuf := bytes.NewBuffer(nil)
-	job.Stdout.Add(stdoutBuf)
-
-	if err := job.Run(); err != nil {
-		return err
-	}
-
-	var (
-		env             engine.Env
-		dat             map[string]interface{}
-		returnedJSONstr string
-	)
-	returnedJSONstr = engine.Tail(stdoutBuf, 1)
-	if err := json.Unmarshal([]byte(returnedJSONstr), &dat); err != nil {
-		return err
-	}
-
-	env.Set("ID", dat["ID"].(string))
 	env.SetInt("Code", (int)(dat["Code"].(float64)))
 	env.Set("Cause", dat["Cause"].(string))
 
@@ -1277,7 +1246,6 @@ func createRouter(eng *engine.Engine, logging, enableCors bool, corsHeaders stri
 			"/pod/stop":         postStop,
 			"/pod/migrate":      postPodMigrate,
 			"/pod/restore":      postPodRestore,
-			"/vm/checkpoint":    postVmCheckpoint,
 			"/vm/restore":       postVmRestore,
 			"/vm/migrate":       postVmMigrate,
 			"/vm/create":        postVmCreate,

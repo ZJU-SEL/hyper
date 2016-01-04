@@ -89,9 +89,8 @@ func (daemon *Daemon) Install(eng *engine.Engine) error {
 		"podStop":           daemon.CmdPodStop,
 		"podMigrate":        daemon.CmdPodMigrate,
 		"podRestore":        daemon.CmdPodRestore,
-		"vmCheckpoint":      daemon.CmdVmCheckpoint,
-		"vmRestore":         daemon.CmdVmRestore,
 		"vmMigrate":         daemon.CmdVmMigrate,
+		"vmRestore":         daemon.CmdVmRestore,
 		"vmCreate":          daemon.CmdVmCreate,
 		"vmKill":            daemon.CmdVmKill,
 		"list":              daemon.CmdList,
@@ -117,6 +116,16 @@ func (daemon *Daemon) Install(eng *engine.Engine) error {
 }
 
 func (daemon *Daemon) Restore() error {
+
+    //FIXME JUST FOR TEST
+    /*tapName, tapFd, err1 := network.AllocateTap()
+    if err1 != nil{
+        glog.Error("************allocate tap failed")
+        return err1
+    }
+    defer network.DeleteTap(tapName)
+    fmt.Printf("***********88tapName: %s, tapFd: %d\n", tapName, tapFd)
+*/
 	if daemon.GetPodNum() == 0 {
 		return nil
 	}
@@ -143,6 +152,7 @@ func (daemon *Daemon) Restore() error {
 	if err != nil {
 		return err
 	}
+
 	daemon.PodList.Lock()
 	glog.V(2).Infof("lock PodList")
 	defer glog.V(2).Infof("unlock PodList")
