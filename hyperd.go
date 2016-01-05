@@ -173,7 +173,7 @@ func mainDaemon(config, host string, flDisableIptables bool) {
 	}
 
 	disableIptables := cfg.MustBool(goconfig.DEFAULT_SECTION, "DisableIptables", false)
-	if err = hypervisor.InitNetwork(d.BridgeIface, d.BridgeIP, disableIptables || flDisableIptables); err != nil {
+	if err = hypervisor.InitNetwork(d.BridgeIface, d.BridgeIP, d.EtcdIp, disableIptables || flDisableIptables); err != nil {
 		glog.Errorf("InitNetwork failed, %s", err.Error())
 		return
 	}

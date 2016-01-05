@@ -1,10 +1,8 @@
 package daemon
 
 import (
-	"fmt"
-	"strings"
-    "time"
 	"encoding/json"
+	"fmt"
 	"github.com/hyperhq/hyper/client"
 	"github.com/hyperhq/hyper/engine"
 	"github.com/hyperhq/hyper/utils"
@@ -17,6 +15,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
 func (daemon *Daemon) CmdPodMigrate(job *engine.Job) error {
@@ -149,18 +149,18 @@ func (daemon *Daemon) MigrateVm(podId, targetAddr string) (int, string, error) {
 	if Response.Code == types.E_MIGRATE_TIMEOUT {
 		migrationSuccess = false
 	}
-    errCode, cause, err := doMigrate(podId, desIp, migrationSuccess)
-    // if only last step failed, resume local vm
-    if err != nil && migrationSuccess {
-	    PodEvent, Status, err := daemon.GetVmChan(vm)
-	    if err != nil {
-		    return -1, err.Error(), err
-    	}
-	    defer vm.ReleaseResponseChan(Status)
-	    defer vm.ReleaseRequestChan(PodEvent)
-        PodEvent <- &hypervisor.ResumeVmCommand{}
-    }
-    return errCode, cause, err
+	errCode, cause, err := doMigrate(podId, desIp, migrationSuccess)
+	// if only last step failed, resume local vm
+	if err != nil && migrationSuccess {
+		PodEvent, Status, err := daemon.GetVmChan(vm)
+		if err != nil {
+			return -1, err.Error(), err
+		}
+		defer vm.ReleaseResponseChan(Status)
+		defer vm.ReleaseRequestChan(PodEvent)
+		PodEvent <- &hypervisor.ResumeVmCommand{}
+	}
+	return errCode, cause, err
 }
 
 func doMigrate(podId, desIp string, isSuccess bool) (int, string, error) {
@@ -189,7 +189,7 @@ func doMigrate(podId, desIp string, isSuccess bool) (int, string, error) {
 	errCode := remoteInfo.GetInt("Code")
 	cause := remoteInfo.Get("Cause")
 	if errCode != types.E_OK {
-	    return errCode, cause, fmt.Errorf(cause)
+		return errCode, cause, fmt.Errorf(cause)
 	}
 	return types.E_OK, "", nil
 }
@@ -417,7 +417,7 @@ func (daemon *Daemon) CmdPodRestore(job *engine.Job) error {
 
 	code, cause, err := daemon.RestorePodData(migrateData, shareType, port, []string{shareList})
 	if err != nil {
-        daemon.cleanLocalPodData(migrateData)
+		daemon.cleanLocalPodData(migrateData)
 		return err
 	}
 
@@ -430,12 +430,12 @@ func (daemon *Daemon) CmdPodRestore(job *engine.Job) error {
 	return nil
 }
 
-func (daemon *Daemon) cleanLocalPodData(migrateData string){
+func (daemon *Daemon) cleanLocalPodData(migrateData string) {
 	podPackage := &PodMigratePackage{}
 	err := json.Unmarshal([]byte(migrateData), podPackage)
-    if err != nil{
-        return
-    }
+	if err != nil {
+		return
+	}
 	clearPodPackageFromFile(podPackage)
 	daemon.clearPodPackageFromDB(podPackage)
 }
@@ -472,8 +472,8 @@ func (daemon *Daemon) RestorePodData(migrateData, shareType, port string, shareL
 	if err != nil {
 		return types.E_FAILED, err.Error(), err
 	}
-    glog.V(1).Info("Wait 60 seconds for test")
-    time.Sleep(500*time.Millisecond)
+	glog.V(1).Info("Wait 60 seconds for test")
+	time.Sleep(500 * time.Millisecond)
 	return types.E_OK, "", nil
 }
 
@@ -481,9 +481,9 @@ func (daemon *Daemon) RestorePod(podId string, podData string) error {
 	if ids, _ := daemon.GetPodContainersByName(podId); ids != nil {
 		for _, id := range ids {
 			err := daemon.DockerCli.LoadContainer(id)
-            if err != nil{
-                return err
-            }
+			if err != nil {
+				return err
+			}
 			glog.V(1).Infof("LoadContainer info %s", id)
 		}
 	}
@@ -518,10 +518,10 @@ func (daemon *Daemon) StartQemuIncomingMode(podPackage *PodMigratePackage, parmL
 	if !strings.EqualFold(pInfo.DriverInfo["qmpSock"].(string), qmpSockName) {
 		pInfo.DriverInfo["qmpSock"] = qmpSockName
 	}
-    err = os.MkdirAll(vmContext.ShareDir, 0755)
-    if err != nil{
-        return err
-    }
+	err = os.MkdirAll(vmContext.ShareDir, 0755)
+	if err != nil {
+		return err
+	}
 	pid, err := qc.StartQemuIncomingMode(vmContext, parmList, qmpSockName)
 	if err != nil {
 		return err
@@ -540,6 +540,7 @@ func (daemon *Daemon) StartQemuIncomingMode(podPackage *PodMigratePackage, parmL
 }
 
 func getRestoreDeviceCommands(daemon *Daemon, podPackage *PodMigratePackage) ([]string, error) {
+	var maps []pod.UserContainerPort
 	pInfo := &hypervisor.PersistInfo{}
 	err := json.Unmarshal([]byte(podPackage.VmData), pInfo)
 	if err != nil {
@@ -549,20 +550,25 @@ func getRestoreDeviceCommands(daemon *Daemon, podPackage *PodMigratePackage) ([]
 	//collect block device command
 	for _, vol := range pInfo.VolumeList {
 		cmdList = append(cmdList,
-		    "-drive", fmt.Sprintf("file=%s,if=none,id=drive%d,format=%s,snapshot=on,cache=writeback", vol.Filename, vol.ScsiId, vol.Format),
+			"-drive", fmt.Sprintf("file=%s,if=none,id=drive%d,format=%s,snapshot=on,cache=writeback", vol.Filename, vol.ScsiId, vol.Format),
 			"-device", fmt.Sprintf("driver=scsi-hd,bus=scsi0.0,scsi-id=%d,drive=drive%d,id=scsi-disk%d", vol.ScsiId, vol.ScsiId, vol.ScsiId),
 		)
 	}
 
 	//collect network device command
-	// FIXME actually I don't think persistence tap device is a secure way, 
-    // cause we only want this tap device is used by current qemu
-    // and we need to unpersistence the tap and delete it after pod is removed
+	// FIXME actually I don't think persistence tap device is a secure way,
+	// cause we only want this tap device is used by current qemu
+	// and we need to unpersistence the tap and delete it after pod is removed
 	for _, netConfig := range pInfo.NetworkList {
-		tapName, err := network.AllocateTap()
-        if err != nil{
-            return nil, err
-        }
+		for _, c := range pInfo.userSpec.Containers {
+			for _, m := range c.Ports {
+				maps = append(maps, m)
+			}
+		}
+		tapName, err := network.AllocateTap(netConfig.IpAddr, maps)
+		if err != nil {
+			return nil, err
+		}
 		cmdList = append(cmdList,
 			"-netdev", fmt.Sprintf("tap,id=eth%d,ifname=%s,downscript=no,script=no", netConfig.Index, tapName),
 			"-device", fmt.Sprintf("virtio-net-pci,netdev=eth%d,bus=pci.0,addr=0x%d,id=eth%d", netConfig.Index, netConfig.PciAddr, netConfig.Index),

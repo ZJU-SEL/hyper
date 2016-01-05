@@ -64,6 +64,7 @@ type Daemon struct {
 	Storage     Storage
 	Hypervisor  string
 	DefaultLog  *pod.PodLogConfig
+	EtcdIp      string
 }
 
 // Install installs daemon capabilities to eng.
@@ -117,15 +118,15 @@ func (daemon *Daemon) Install(eng *engine.Engine) error {
 
 func (daemon *Daemon) Restore() error {
 
-    //FIXME JUST FOR TEST
-    /*tapName, tapFd, err1 := network.AllocateTap()
-    if err1 != nil{
-        glog.Error("************allocate tap failed")
-        return err1
-    }
-    defer network.DeleteTap(tapName)
-    fmt.Printf("***********88tapName: %s, tapFd: %d\n", tapName, tapFd)
-*/
+	//FIXME JUST FOR TEST
+	/*tapName, tapFd, err1 := network.AllocateTap()
+	  if err1 != nil{
+	      glog.Error("************allocate tap failed")
+	      return err1
+	  }
+	  defer network.DeleteTap(tapName)
+	  fmt.Printf("***********88tapName: %s, tapFd: %d\n", tapName, tapFd)
+	*/
 	if daemon.GetPodNum() == 0 {
 		return nil
 	}
@@ -218,6 +219,8 @@ func NewDaemonFromDirectory(eng *engine.Engine) (*Daemon, error) {
 	cbfs, _ := cfg.GetValue(goconfig.DEFAULT_SECTION, "Cbfs")
 	glog.V(0).Infof("The config: bios=%s, cbfs=%s", bios, cbfs)
 	host, _ := cfg.GetValue(goconfig.DEFAULT_SECTION, "Host")
+	etcdIp, _ := cfg.GetValue(goconfig.DEFAULT_SECTION, "EtcdIp")
+	glog.V(0).Infof("The config: etcdIp=%s", etcdIp)
 
 	var tempdir = path.Join(utils.HYPER_ROOT, "run")
 	os.Setenv("TMPDIR", tempdir)
@@ -260,6 +263,7 @@ func NewDaemonFromDirectory(eng *engine.Engine) (*Daemon, error) {
 		Host:        host,
 		BridgeIP:    bridgeip,
 		BridgeIface: biface,
+		EtcdIp:      etcdIp,
 	}
 
 	// Get the docker daemon info
