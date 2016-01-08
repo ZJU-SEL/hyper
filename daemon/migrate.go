@@ -10,6 +10,7 @@ import (
 	"github.com/hyperhq/runv/hypervisor/network"
 	"github.com/hyperhq/runv/hypervisor/qemu"
 	"github.com/hyperhq/runv/hypervisor/types"
+	"github.com/hyperhq/runv/hypervisor/pod"
 	"github.com/hyperhq/runv/lib/glog"
 	"io/ioutil"
 	"net/url"
@@ -160,6 +161,14 @@ func (daemon *Daemon) MigrateVm(podId, targetAddr string) (int, string, error) {
 		defer vm.ReleaseRequestChan(PodEvent)
 		PodEvent <- &hypervisor.ResumeVmCommand{}
 	}
+
+    if err == nil{
+        _, cause, err := daemon.CleanPod(podId)
+        if err != nil{
+            glog.V(1).Infof("Clean local pod failed: %s", cause)
+        }
+        glog.V(1).Infof("Clean local pod success")
+    }
 	return errCode, cause, err
 }
 
@@ -472,8 +481,8 @@ func (daemon *Daemon) RestorePodData(migrateData, shareType, port string, shareL
 	if err != nil {
 		return types.E_FAILED, err.Error(), err
 	}
-	glog.V(1).Info("Wait 60 seconds for test")
-	time.Sleep(500 * time.Millisecond)
+	glog.V(1).Info("Wait for qemu start 1 second")
+	time.Sleep(1000 * time.Millisecond)
 	return types.E_OK, "", nil
 }
 
@@ -555,16 +564,16 @@ func getRestoreDeviceCommands(daemon *Daemon, podPackage *PodMigratePackage) ([]
 		)
 	}
 
+	for _, c := range pInfo.UserSpec.Containers {
+		for _, m := range c.Ports {
+			maps = append(maps, m)
+		}
+	}
 	//collect network device command
 	// FIXME actually I don't think persistence tap device is a secure way,
 	// cause we only want this tap device is used by current qemu
 	// and we need to unpersistence the tap and delete it after pod is removed
 	for _, netConfig := range pInfo.NetworkList {
-		for _, c := range pInfo.userSpec.Containers {
-			for _, m := range c.Ports {
-				maps = append(maps, m)
-			}
-		}
 		tapName, err := network.AllocateTap(netConfig.IpAddr, maps)
 		if err != nil {
 			return nil, err
