@@ -11,11 +11,13 @@ import (
 	"strings"
 	"syscall"
 	"time"
+    "io/ioutil"
 
 	dockertypes "github.com/hyperhq/hyper/lib/docker/api/types"
 	"github.com/hyperhq/hyper/storage"
 	"github.com/hyperhq/hyper/storage/aufs"
 	dm "github.com/hyperhq/hyper/storage/devicemapper"
+    "github.com/hyperhq/hyper/storage/rbd"
 	"github.com/hyperhq/hyper/storage/overlay"
 	"github.com/hyperhq/hyper/storage/vbox"
 	"github.com/hyperhq/hyper/utils"
@@ -31,6 +33,10 @@ const (
 	DEFAULT_DM_META_LOOP string = "/dev/loop7"
 	DEFAULT_DM_VOL_SIZE  int    = 2 * 1024 * 1024 * 1024
 	DEFAULT_VOL_FS              = "ext4"
+
+    DEFAULT_CEPH_CONFIG_FILE string = "/etc/ceph/ceph.conf"
+    DEFAULT_CR_VOL_SIZE int = 2 * 1024 * 1024 * 1024
+    DEFAULT_CR_VOL_ORDER int = 16
 )
 
 type Storage interface {
@@ -44,6 +50,7 @@ type Storage interface {
 	InjectFile(src io.Reader, containerId, target, rootDir string, perm, uid, gid int) error
 	CreateVolume(daemon *Daemon, podId, shortName string) (*hypervisor.VolumeInfo, error)
 	RemoveVolume(podId string, record []byte) error
+    MigrateMetadata(containerId, metadata, initMetadata string) error
 }
 
 var StorageDrivers map[string]func(*dockertypes.Info) (Storage, error) = map[string]func(*dockertypes.Info) (Storage, error){
@@ -51,6 +58,7 @@ var StorageDrivers map[string]func(*dockertypes.Info) (Storage, error) = map[str
 	"aufs":         AufsFactory,
 	"overlay":      OverlayFsFactory,
 	"vbox":         VBoxStorageFactory,
+    "rbd":          CephRbdFactory,
 }
 
 func StorageFactory(sysinfo *dockertypes.Info) (Storage, error) {
@@ -267,6 +275,18 @@ func (dms *DevMapperStorage) RemoveVolume(podId string, record []byte) error {
 	return nil
 }
 
+func (dms *DevMapperStorage) MigrateMetadata(containerId, metadata, initMetadata string) error{
+    metadataFile := path.Join(utils.HYPER_ROOT, "devicemapper/metadata", containerId)
+    if err := ioutil.WriteFile(metadataFile, []byte(metadata), 0666); err != nil{
+        return err
+    }
+    initMetadataFile := metadataFile + "-init"
+    if err := ioutil.WriteFile(initMetadataFile, []byte(initMetadata), 0666); err != nil{
+        return err
+    }
+    return nil
+}
+
 func (dms *DevMapperStorage) randDevId() int {
 	return rand.Intn(1<<24-1) + 1 // 0 reserved for pool device
 }
@@ -332,6 +352,10 @@ func (a *AufsStorage) RemoveVolume(podId string, record []byte) error {
 	return nil
 }
 
+func (a *AufsStorage) MigrateMetadata(containerId, metadata, initMetadata string) error{
+    return nil
+}
+
 type OverlayFsStorage struct {
 	rootPath string
 }
@@ -390,6 +414,10 @@ func (o *OverlayFsStorage) RemoveVolume(podId string, record []byte) error {
 	return nil
 }
 
+func (o *OverlayFsStorage) MigrateMetadata(containerId, metadata, initMetadata string) error{
+    return nil
+}
+
 type VBoxStorage struct {
 	rootPath string
 }
@@ -446,3 +474,164 @@ func (v *VBoxStorage) CreateVolume(daemon *Daemon, podId, shortName string) (*hy
 func (v *VBoxStorage) RemoveVolume(podId string, record []byte) error {
 	return nil
 }
+
+func (v *VBoxStorage) MigrateMetadata(containerId, metadata, initMetadata string) error{
+    return nil
+}
+
+type CephRbdStorage struct {
+    VolPoolName string
+    ImagePoolName string
+    rootPath  string
+    ImageFsType    string
+    VolFsType  string
+    VolOrder int
+    CrPoolData *rbd.CephRbd
+}
+
+func CephRbdFactory(sysinfo *dockertypes.Info) (Storage, error){
+    driver := &CephRbdStorage{}
+
+    driver.VolPoolName = DEFAULT_DM_POOL
+    driver.ImagePoolName = "docker-image-pool"
+   
+    //FIXME docker rbd driver need complete info function
+    //for _, pair := range sysinfo.DriverStatus {
+
+//    }
+    driver.ImageFsType = "ext4"
+    driver.VolFsType = DEFAULT_VOL_FS
+    driver.VolOrder = DEFAULT_CR_VOL_ORDER
+    driver.rootPath = path.Join(utils.HYPER_ROOT, "rbd")
+    return driver, nil
+}
+
+func (crs *CephRbdStorage) Type() string{
+    return "rbd"
+}
+
+func (crs *CephRbdStorage) RootPath() string{
+    return crs.rootPath
+}
+
+func (crs *CephRbdStorage) Init() error{
+    crPool := rbd.CephRbd{
+        Order: crs.VolOrder,
+        VolPoolName: crs.VolPoolName,
+        ImagePoolName: crs.ImagePoolName,
+        VolPrefix: "hyper_vol",
+        ImagePrefix: "docker_image",
+        ImageFsType: crs.ImageFsType,
+        VolFsType: crs.VolFsType,
+        ClientId: "admin",
+        ConfigFile: DEFAULT_CEPH_CONFIG_FILE,
+    }
+    crs.CrPoolData = &crPool
+    rand.Seed(time.Now().UnixNano())
+    return rbd.InitRbdPool(&crPool)
+}
+
+func (crs *CephRbdStorage) Restore() error {
+    return nil
+}
+
+func (crs *CephRbdStorage) CleanUp() error {
+    return rbd.CRCleanup(crs.CrPoolData)
+}
+
+func (crs *CephRbdStorage) PrepareContainer(id, shareDir string) (*hypervisor.ContainerInfo, error) {
+    poolName := crs.CrPoolData.ImagePoolName
+    imgName := fmt.Sprintf("%s_%s", crs.CrPoolData.ImagePrefix, id)
+    if err := rbd.GetRemoteDevice(poolName, imgName); err != nil{
+        return nil, err
+    }
+    devFullName, err := rbd.MountContainerToShareDir(id, shareDir, crs.CrPoolData)
+    if err != nil{
+        glog.Error("got error when mount container to share dir ", err.Error())
+        return nil, err
+    }
+    fstype, err := rbd.ProbeFsType(devFullName)
+    if err != nil{
+        fstype = "ext4"
+    }
+    return &hypervisor.ContainerInfo{
+        Id: id,
+        Rootfs: "/rootfs",
+        Image: devFullName,
+        Fstype: fstype,
+    }, nil
+}
+
+func (crs *CephRbdStorage) InjectFile(src io.Reader, containerId, target, rootDir string, perm, uid, gid int) error {
+    return rbd.InjectFile(src, crs.CrPoolData, containerId, target, rootDir, perm, uid, gid)
+}
+
+func (crs *CephRbdStorage) CreateVolume(daemon *Daemon, podId, shortName string) (*hypervisor.VolumeInfo, error) {
+
+    volName := fmt.Sprintf("%s_%s", podId, shortName)
+    existCode, _ := daemon.GetVolumeId(podId, volName)
+    
+    if err := rbd.CreateVolume(crs.CrPoolData, volName, DEFAULT_CR_VOL_SIZE, existCode == 1); err != nil{
+        return nil, err
+    }
+    daemon.SetVolumeId(podId, volName, "1")
+
+    fullDevName := fmt.Sprintf("/dev/rbd/%s/%s", crs.VolPoolName, volName)
+    fstype, err := dm.ProbeFsType(fullDevName)
+    if err != nil{
+        fstype = "ext4"
+    }
+
+    glog.V(1).Infof("volume %s created with rbd as %s", shortName, volName)
+
+    return &hypervisor.VolumeInfo{
+        Name: shortName,
+        Filepath: fullDevName,
+        Fstype: fstype,
+        Format: "raw",
+    }, nil
+}
+
+func (crs *CephRbdStorage) RemoveVolume(podId string, record []byte) error {
+    fields := strings.Split(string(record), ":")
+    if fields[1] != "1"{
+        //This volume is created by devicemapper 
+        glog.Warning("Volume %s is created by devicemapper, should not be deleted by ceph Rbd")
+        return nil
+    }
+    volName := fields[0]
+    if err := rbd.DeleteVolume(crs.CrPoolData, volName); err != nil{
+        glog.Error(err.Error())
+        return err
+    }
+    return nil
+}
+
+//rbd driver only need to remap rbd image 
+func (crs *CephRbdStorage) MigrateImage(imgPath, volPath string, cIdList, volNameList []string) error{
+    for _, cId := range cIdList{
+        imgName := fmt.Sprintf("%s_%s", crs.CrPoolData.ImagePrefix, cId)
+        if err := rbd.GetRemoteDevice(crs.CrPoolData.ImagePoolName, imgName); err != nil{
+            glog.Errorf("Migrate container image %s failed: %v", imgName, err)
+            return err
+        }
+        glog.V(1).Infof("Migrate container image %s succeed", imgName)
+    }
+    for _, volName := range volNameList {
+        if err := rbd.GetRemoteDevice(crs.CrPoolData.VolPoolName, volName); err != nil{
+            glog.Errorf("Migrate volume %s failed: %v", volName, err)
+            return err
+        }
+        glog.V(1).Infof("Migrate volume %s succeed", volName)
+    }
+    return nil
+}
+
+func (crs *CephRbdStorage) MigrateMetadata(containerId, metadata, initMetadata string) error{
+    return nil
+}
+
+func (crs *CephRbdStorage) randDevId() int {
+    return rand.Intn(1<<24-1) + 1
+}
+
