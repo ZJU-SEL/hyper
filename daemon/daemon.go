@@ -7,6 +7,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+    "time"
 
 	"github.com/Unknwon/goconfig"
 	"github.com/docker/docker/daemon/logger/jsonfilelog"
@@ -22,6 +23,7 @@ import (
 	"github.com/hyperhq/runv/lib/glog"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
+    etcdClient "github.com/coreos/etcd/client"
 )
 
 var (
@@ -64,7 +66,7 @@ type Daemon struct {
 	Storage     Storage
 	Hypervisor  string
 	DefaultLog  *pod.PodLogConfig
-	EtcdIp      string
+    EtcdKeysAPI etcdClient.KeysAPI
 }
 
 // Install installs daemon capabilities to eng.
@@ -188,6 +190,21 @@ func NewDaemon(eng *engine.Engine) (*Daemon, error) {
 	return daemon, nil
 }
 
+func initEtcdClient(etcdIp string) (etcdClient.KeysAPI, error){
+    cfg := etcdClient.Config{
+        Endpoints: []string{etcdIp},
+        Transport: etcdClient.DefaultTransport,
+        HeaderTimeoutPerRequest: time.Second,
+    }
+    c, err := etcdClient.New(cfg)
+    if err != nil{
+        glog.Errorf("Init Etcd error: %v", err)
+        return nil, err
+    }
+    kapi := etcdClient.NewKeysAPI(c)
+    return kapi, nil
+}
+
 func NewDaemonFromDirectory(eng *engine.Engine) (*Daemon, error) {
 	// register portallocator release on shutdown
 	eng.OnShutdown(func() {
@@ -247,6 +264,13 @@ func NewDaemonFromDirectory(eng *engine.Engine) (*Daemon, error) {
 		glog.Errorf(err1.Error())
 		return nil, err1
 	}
+
+    etcdKeysAPI, err := initEtcdClient(etcdIp)
+    if err != nil{
+        glog.Errorf(err.Error())
+        return nil, err
+    }
+
 	vList := map[string]*hypervisor.Vm{}
 	daemon := &Daemon{
 		ID:          fmt.Sprintf("%d", os.Getpid()),
@@ -263,7 +287,7 @@ func NewDaemonFromDirectory(eng *engine.Engine) (*Daemon, error) {
 		Host:        host,
 		BridgeIP:    bridgeip,
 		BridgeIface: biface,
-		EtcdIp:      etcdIp,
+        EtcdKeysAPI: etcdKeysAPI,
 	}
 
 	// Get the docker daemon info

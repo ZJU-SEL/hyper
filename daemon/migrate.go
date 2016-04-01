@@ -8,13 +8,15 @@ import (
 	"github.com/hyperhq/hyper/utils"
 	"github.com/hyperhq/runv/hypervisor"
 	"github.com/hyperhq/runv/hypervisor/network"
+	"github.com/hyperhq/runv/hypervisor/pod"
 	"github.com/hyperhq/runv/hypervisor/qemu"
 	"github.com/hyperhq/runv/hypervisor/types"
-	"github.com/hyperhq/runv/hypervisor/pod"
 	"github.com/hyperhq/runv/lib/glog"
+	//"golang.org/x/net/context"
 	"io/ioutil"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -49,7 +51,9 @@ func (daemon *Daemon) CmdVmMigrate(job *engine.Job) error {
 	}
 	podId := job.Args[0]
 	desAddr := job.Args[1]
-	code, cause, err := daemon.MigrateVm(podId, desAddr)
+	netRedirectScript := job.Args[2]
+	netRecoverScript := job.Args[3]
+	code, cause, err := daemon.MigrateVm(podId, desAddr, netRedirectScript, netRecoverScript)
 	if err != nil {
 		return err
 	}
@@ -86,7 +90,7 @@ func (daemon *Daemon) CmdVmRestore(job *engine.Job) error {
 }
 
 func (daemon *Daemon) MigratePod(podId, desAddr string) (int, string, error) {
-	var shareType = "nfs"
+	var shareType = "rbd"
 	podPackage := &PodMigratePackage{
 		PodId: podId,
 	}
@@ -114,12 +118,11 @@ func (daemon *Daemon) MigratePod(podId, desAddr string) (int, string, error) {
 	return types.E_OK, "", nil
 }
 
-func (daemon *Daemon) MigrateVm(podId, targetAddr string) (int, string, error) {
+func (daemon *Daemon) MigrateVm(podId, targetAddr, netRedirectScript, netRecoverScript string) (int, string, error) {
 	desIp, port, err := parseAddr(targetAddr)
 	if err != nil {
 		return -1, "", err
 	}
-	glog.V(1).Infof("now we are in the MigrateVm, it worked well ... for now")
 	var Response *types.VmResponse
 	daemon.PodList.Lock()
 	glog.V(2).Infof("lock PodList")
@@ -150,6 +153,13 @@ func (daemon *Daemon) MigrateVm(podId, targetAddr string) (int, string, error) {
 	if Response.Code == types.E_MIGRATE_TIMEOUT {
 		migrationSuccess = false
 	}
+
+	//Redirect network flow to destination host
+	originIp, err := daemon.redirectNetwork(desIp, netRedirectScript)
+	if err != nil {
+		return -1, err.Error(), err
+	}
+
 	errCode, cause, err := doMigrate(podId, desIp, migrationSuccess)
 	// if only last step failed, resume local vm
 	if err != nil && migrationSuccess {
@@ -160,16 +170,53 @@ func (daemon *Daemon) MigrateVm(podId, targetAddr string) (int, string, error) {
 		defer vm.ReleaseResponseChan(Status)
 		defer vm.ReleaseRequestChan(PodEvent)
 		PodEvent <- &hypervisor.ResumeVmCommand{}
+		daemon.restoreNetwork(originIp, netRecoverScript)
 	}
 
-    if err == nil{
-        _, cause, err := daemon.CleanPod(podId)
-        if err != nil{
-            glog.V(1).Infof("Clean local pod failed: %s", cause)
-        }
-        glog.V(1).Infof("Clean local pod success")
-    }
+	if err == nil {
+		glog.V(1).Infof("Migrate out successfully, ready to clean local pod")
+		_, cause, err := daemon.CleanPodAfterMigration(podId)
+		if err != nil {
+			glog.V(1).Infof("Clean local pod failed: %s", cause)
+		}
+		glog.V(1).Infof("Clean local pod success")
+	}
 	return errCode, cause, err
+}
+
+func (daemon *Daemon) redirectNetwork(desIp, netRedirectScript string) (string, error) {
+	/*resp, err := daemon.EtcdKeysAPI.Get(context.Background(), "servers/server1", nil)
+	if err != nil {
+		glog.Errorf("Get origin Host IP failed: %v", err)
+		return "", err
+	}
+	originIp := strings.TrimLeft(resp.Node.Value, "/")
+	daemon.EtcdKeysAPI.Set(context.Background(), "servers/server1", desIp+":1337", nil)
+	*/
+	originIp, err := utils.GetIPOfEth0()
+	if err != nil {
+		return "", err
+	}
+	cmd := fmt.Sprintf("%s %s", netRedirectScript, desIp)
+	command := exec.Command("/bin/sh", "-c", cmd)
+	output, err := command.Output()
+	if err != nil {
+		glog.Error(output)
+		return originIp, err
+	}
+	return originIp, nil
+}
+
+func (daemon *Daemon) restoreNetwork(originIp, netRecoverScript string) error {
+	//daemon.EtcdKeysAPI.Set(context.Background(), "servers/server1", originIp+":1337", nil)
+	cmd := fmt.Sprintf("%s %s", netRecoverScript, originIp)
+	command := exec.Command("/bin/sh", "-c", cmd)
+	output, err := command.Output()
+	if err != nil {
+		glog.Error(output)
+		return err
+	}
+	return nil
 }
 
 func doMigrate(podId, desIp string, isSuccess bool) (int, string, error) {
@@ -266,6 +313,8 @@ func (daemon *Daemon) GetShareDirList(podPackage *PodMigratePackage, shareType, 
 		}
 		localAddr := fmt.Sprintf("%s:%s", localIp, backendFilePath)
 		shareList = append(shareList, localAddr)
+	case "rbd":
+		break
 	default:
 		return nil, fmt.Errorf("not support shareType: %s", shareType)
 	}
@@ -278,6 +327,8 @@ func RemoveShareDirList(shareList []string, shareType string) error {
 		for _, shareDir := range shareList {
 			utils.RemoveNFSShareDir(shareDir)
 		}
+	case "rbd":
+		break
 	default:
 		return fmt.Errorf("not supported shareType: %s", shareType)
 	}
@@ -317,25 +368,25 @@ func (daemon *Daemon) gatherPodPackageFromDb(podId string, podPackage *PodMigrat
 
 func gatherPodPackageFromFile(podId string, podPackage *PodMigratePackage) error {
 	containersRootPath := filepath.Join(utils.HYPER_ROOT, "containers")
-	metadataPath := filepath.Join(utils.HYPER_ROOT, "devicemapper/metadata")
+	//	metadataPath := filepath.Join(utils.HYPER_ROOT, "devicemapper/metadata")
 	containers := strings.Split(podPackage.PodContainers, ":")
 	for _, cId := range containers {
 		containerPackage := &ContainerPackage{Id: cId}
 
-		idMetadataFile := filepath.Join(metadataPath, cId)
-		err, metadata := readFile(idMetadataFile)
-		if err != nil {
-			return err
-		}
-		containerPackage.Metadata = metadata
+		/*		idMetadataFile := filepath.Join(metadataPath, cId)
+				err, metadata := readFile(idMetadataFile)
+				if err != nil {
+					return err
+				}
+				containerPackage.Metadata = metadata
 
-		idMetadataInitFile := idMetadataFile + "-init"
-		err, metadataInit := readFile(idMetadataInitFile)
-		if err != nil {
-			return err
-		}
-		containerPackage.MetadataInit = metadataInit
-
+				idMetadataInitFile := idMetadataFile + "-init"
+				err, metadataInit := readFile(idMetadataInitFile)
+				if err != nil {
+					return err
+				}
+				containerPackage.MetadataInit = metadataInit
+		*/
 		containerPath := filepath.Join(containersRootPath, cId)
 
 		configFile := filepath.Join(containerPath, "config.json")
@@ -589,17 +640,19 @@ func getRestoreDeviceCommands(daemon *Daemon, podPackage *PodMigratePackage) ([]
 func (daemon *Daemon) restorePodPackageToLocal(podPackage *PodMigratePackage, shareDir string) error {
 	// the order is important, cause we need update volume's path and write metadata to file,
 	// then we can read metadata from file, create new device and update deviceId again.
-	err := updateVmData(daemon, podPackage)
+	//err := updateVmData(daemon, podPackage)
+	//if err != nil {
+	//	return err
+	//}
+
+	err := daemon.restorePodPackageToFile(podPackage)
 	if err != nil {
 		return err
 	}
 
-	err = restorePodPackageToFile(podPackage)
-	if err != nil {
-		return err
-	}
+	//err = daemon.Storage.(*DevMapperStorage).Restore(shareDir, podPackage.PodContainers)
 
-	err = daemon.Storage.(*DevMapperStorage).Restore(shareDir, podPackage.PodContainers)
+	err = daemon.Storage.(*CephRbdStorage).MigrateImage(shareDir, "", strings.Split(podPackage.PodContainers, ":"), []string{})
 	if err != nil {
 		return err
 	}
@@ -645,20 +698,12 @@ func (daemon *Daemon) restorePodPackageToDB(podPackage *PodMigratePackage) error
 	return nil
 }
 
-func restorePodPackageToFile(podPackage *PodMigratePackage) error {
+func (daemon *Daemon) restorePodPackageToFile(podPackage *PodMigratePackage) error {
 	glog.V(1).Infof("Prepare to restore local file from migration")
 	containerList := podPackage.ContainerList
 	containersRootPath := filepath.Join(utils.HYPER_ROOT, "containers")
-	metadataPath := filepath.Join(utils.HYPER_ROOT, "devicemapper/metadata")
 	for _, container := range containerList {
-		idMetadataFile := filepath.Join(metadataPath, container.Id)
-		err := writeFile(idMetadataFile, container.Metadata)
-		if err != nil {
-			return err
-		}
-
-		idMetadataInitFile := idMetadataFile + "-init"
-		err = writeFile(idMetadataInitFile, container.MetadataInit)
+		err := daemon.Storage.MigrateMetadata(container.Id, container.Metadata, container.MetadataInit)
 		if err != nil {
 			return err
 		}
@@ -699,12 +744,12 @@ func (daemon *Daemon) clearPodPackageFromDB(podPackage *PodMigratePackage) {
 func clearPodPackageFromFile(podPackage *PodMigratePackage) {
 	containerList := podPackage.ContainerList
 	containersRootPath := filepath.Join(utils.HYPER_ROOT, "containers")
-	metadataPath := filepath.Join(utils.HYPER_ROOT, "devicemapper/metadata")
+	//metadataPath := filepath.Join(utils.HYPER_ROOT, "devicemapper/metadata")
 	for _, container := range containerList {
-		idMetadataFile := filepath.Join(metadataPath, container.Id)
-		os.Remove(idMetadataFile)
-		idMetadataInitFile := idMetadataFile + "-init"
-		os.Remove(idMetadataInitFile)
+		//	idMetadataFile := filepath.Join(metadataPath, container.Id)
+		//	os.Remove(idMetadataFile)
+		//	idMetadataInitFile := idMetadataFile + "-init"
+		//	os.Remove(idMetadataInitFile)
 		containerPath := filepath.Join(containersRootPath, container.Id)
 		os.RemoveAll(containerPath)
 	}

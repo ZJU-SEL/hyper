@@ -708,7 +708,13 @@ func postPodRestore(eng *engine.Engine, version version.Version, w http.Response
 
 	glog.V(1).Infof("Restore the pod data is %s\n shareType is %s, shareList is %s\n", r.Form.Get("migrateData"), r.Form.Get("shareType"), r.Form["shareList"])
 	//FIXME should transfer all of the shareList
-	job := eng.Job("podRestore", r.Form.Get("migrateData"), r.Form.Get("port"), r.Form.Get("shareType"), r.Form["shareList"][0])
+	var shareList string
+	if r.Form["shareList"] == nil {
+		shareList = ""
+	} else {
+		shareList = r.Form["shareList"][0]
+	}
+	job := eng.Job("podRestore", r.Form.Get("migrateData"), r.Form.Get("port"), r.Form.Get("shareType"), shareList)
 	stdoutBuf := bytes.NewBuffer(nil)
 	job.Stdout.Add(stdoutBuf)
 
@@ -738,8 +744,8 @@ func postVmMigrate(eng *engine.Engine, version version.Version, w http.ResponseW
 		return nil
 	}
 
-	glog.V(1).Infof("Migrate the POD ID is %s, targetAddr is %s\n", r.Form.Get("podId"), r.Form.Get("desAddr"))
-	job := eng.Job("vmMigrate", r.Form.Get("podId"), r.Form.Get("desAddr"))
+	glog.V(1).Infof("Migrate the POD ID is %s, targetAddr is %s, networkRedirect is %s, networkRecover is %s\n", r.Form.Get("podId"), r.Form.Get("desAddr"), r.Form.Get("desAddr"), r.Form.Get("networkRedirect"), r.Form.Get("networkRecover"))
+	job := eng.Job("vmMigrate", r.Form.Get("podId"), r.Form.Get("desAddr"), r.Form.Get("networkRedirect"), r.Form.Get("networkRecover"))
 	stdoutBuf := bytes.NewBuffer(nil)
 	job.Stdout.Add(stdoutBuf)
 

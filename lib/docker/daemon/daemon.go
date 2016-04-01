@@ -264,7 +264,13 @@ func (daemon *Daemon) loadContainer(id string) error {
 		go func(container *Container, registered bool) {
 			defer group.Done()
 
-            // migration container should always be not registered
+			//register name to db
+			if _, err := daemon.containerGraph.Set(container.Name, container.ID); err != nil {
+				if !graphdb.IsNonUniqueNameError(err) {
+					glog.Errorf("Container name %s has been used", container.Name)
+				}
+			}
+			// migration container should always be not registered
 			if err := daemon.register(container, false); err != nil {
 				glog.V(1).Infof("Failed to register container %s: %s", container.ID, err)
 			}

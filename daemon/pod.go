@@ -301,9 +301,11 @@ func (p *Pod) InitContainers(daemon *Daemon, dclient DockerInterface) (err error
 		glog.V(1).Info("trying to init container ", c.Name)
 
 		if info, ok := containers[c.Name]; ok {
+			glog.V(1).Info("trying to add container ", c.Name)
 			p.status.AddContainer(info.id, info.name, info.image, []string{}, types.S_POD_CREATED)
 			continue
 		}
+		glog.V(1).Info("trying to recreate container ", c.Name)
 
 		var (
 			cId []byte
@@ -493,7 +495,7 @@ func (p *Pod) PrepareVolume(daemon *Daemon, sd Storage) (err error) {
 			}
 
 			v.Source = vol.Filepath
-			if sd.Type() != "devicemapper" {
+			if sd.Type() != "devicemapper" && sd.Type() != "rbd" {
 				v.Driver = "vfs"
 
 				vol.Filepath, err = storage.MountVFSVolume(v.Source, sharedDir)

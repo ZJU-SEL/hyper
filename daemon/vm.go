@@ -195,8 +195,10 @@ func (daemon *Daemon) GetVM(vmId string, resource *pod.UserResource, lazy bool, 
 
 	vm, ok := daemon.VmList[vmId]
 	if !ok {
+        glog.V(3).Infof("—----------------------daemon.GetVm----after StartVm")
 		return nil, fmt.Errorf("The VM %s doesn't exist", vmId)
 	}
+    glog.V(3).Infof("----------------------daemon.GetVm----after StartVm")
 	/* FIXME: check if any pod is running on this vm? */
 	glog.Infof("find vm:%s", vm.Id)
 	if resource.Vcpu != vm.Cpu {

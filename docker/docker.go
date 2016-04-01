@@ -32,12 +32,18 @@ type Docker struct {
 	daemon *daemon.Daemon
 }
 
-func Init() {
+func Init(mirrors []string, insecureRegistries []string) {
 	if daemonCfg.LogConfig.Config == nil {
 		daemonCfg.LogConfig.Config = make(map[string]string)
 	}
 	daemonCfg.InstallFlags()
 	registryCfg.InstallFlags()
+	for _, m := range mirrors {
+		registryCfg.Mirrors.Set(m)
+	}
+	for _, ir := range insecureRegistries {
+		registryCfg.InsecureRegistries.Set(ir)
+	}
 	hyperd.NewDockerImpl = func() (docker hyperd.DockerInterface, e error) {
 		docker, e = NewDocker()
 		if e != nil {
