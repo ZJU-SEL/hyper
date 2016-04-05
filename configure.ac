@@ -55,6 +55,13 @@ AC_CHECK_HEADERS([stdlib.h string.h libxl.h])
 AC_CHECK_HEADER([sqlite3.h], [],
 				[AC_MSG_ERROR([Could not find or include sqlite3.h])],
 				[])
+AC_CHECK_HEADER([rbd/librbd.h], [],
+				[AC_MSG_ERROR([Could not find or include rbd/librbd.h])],
+				[])
+AC_CHECK_HEADER([rados/librados.h], [],
+				[AC_MSG_ERROR([Could not find or include rados/librados.h])],
+				[])
+
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_CHECK_HEADER_STDBOOL
