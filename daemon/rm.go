@@ -129,12 +129,12 @@ func (daemon *Daemon) CleanPodAfterMigration(podId string) (int, string, error) 
 		}
 		if code == types.E_VM_SHUTDOWN {
 			daemon.DeletePodFromDB(podId)
-			/*for _, c := range pod.status.Containers {
+			for _, c := range pod.status.Containers {
 				glog.V(1).Infof("Ready to rm container: %s", c.Id)
 				if _, _, err = daemon.DockerCli.SendCmdDelete(c.Id); err != nil {
 					glog.V(1).Infof("Error to rm container: %s", err.Error())
 				}
-			}*/
+			}
 			daemon.RemovePod(podId)
 			daemon.DeletePodContainerFromDB(podId)
 			daemon.DeleteVolumeId(podId)

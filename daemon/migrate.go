@@ -261,16 +261,18 @@ func (daemon *Daemon) ClearPodFromLocal(podId string) {
 	defer glog.V(2).Infof("unlock PodList")
 	defer daemon.PodList.Unlock()
 	//FIXME Technically, I'm not sure the container's image is removed from devicemapper
-	pod, ok := daemon.PodList.Get(podId)
-	if !ok {
-		return
-	}
-	for _, c := range pod.status.Containers {
-		glog.V(1).Infof("Ready to clear container: %s", c.Id)
-		if _, _, err := daemon.DockerCli.SendCmdDelete(c.Id); err != nil {
-			glog.Warningf("Error to clear container: %s", err.Error())
+	/*
+		pod, ok := daemon.PodList.Get(podId)
+		if !ok {
+			return
 		}
-	}
+			for _, c := range pod.status.Containers {
+				glog.V(1).Infof("Ready to clear container: %s", c.Id)
+				if _, _, err := daemon.DockerCli.SendCmdDelete(c.Id); err != nil {
+					glog.Warningf("Error to clear container: %s", err.Error())
+				}
+			}
+	*/
 	daemon.RemovePod(podId)
 }
 
