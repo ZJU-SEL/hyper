@@ -154,10 +154,13 @@ func (daemon *Daemon) MigrateVm(podId, targetAddr, netRedirectScript, netRecover
 		migrationSuccess = false
 	}
 
+	var originIp string
 	//Redirect network flow to destination host
-	originIp, err := daemon.redirectNetwork(desIp, netRedirectScript)
-	if err != nil {
-		return -1, err.Error(), err
+	if netRedirectScript != "" {
+		originIp, err = daemon.redirectNetwork(desIp, netRedirectScript)
+		if err != nil {
+			return -1, err.Error(), err
+		}
 	}
 
 	errCode, cause, err := doMigrate(podId, desIp, migrationSuccess)
@@ -170,7 +173,9 @@ func (daemon *Daemon) MigrateVm(podId, targetAddr, netRedirectScript, netRecover
 		defer vm.ReleaseResponseChan(Status)
 		defer vm.ReleaseRequestChan(PodEvent)
 		PodEvent <- &hypervisor.ResumeVmCommand{}
-		daemon.restoreNetwork(originIp, netRecoverScript)
+		if netRecoverScript != "" {
+			daemon.restoreNetwork(originIp, netRecoverScript)
+		}
 	}
 
 	if err == nil {
