@@ -22,6 +22,14 @@ import (
 	"time"
 )
 
+type MigrationConfig struct {
+	LocalIP           string
+	NetRedirectScript string
+	NetRecoverScript  string
+}
+
+var MigrationOption MigrationConfig
+
 func (daemon *Daemon) CmdPodMigrate(job *engine.Job) error {
 	if len(job.Args) == 0 {
 		return fmt.Errorf("Can not execute 'migrate' command without podId")
@@ -154,10 +162,20 @@ func (daemon *Daemon) MigrateVm(podId, targetAddr, netRedirectScript, netRecover
 		migrationSuccess = false
 	}
 
-	var originIp string
+	if netRedirectScript == "" {
+		netRedirectScript = MigrationOption.NetRedirectScript
+	}
+	if netRecoverScript == "" {
+		netRecoverScript = MigrationOption.NetRecoverScript
+	}
+	originIp := MigrationOption.LocalIP
+	if originIp == "" && netRecoverScript != "" {
+		originIp = utils.GetHostIP()
+	}
+
 	//Redirect network flow to destination host
 	if netRedirectScript != "" {
-		originIp, err = daemon.redirectNetwork(desIp, netRedirectScript)
+		err = daemon.redirectNetwork(desIp, netRedirectScript)
 		if err != nil {
 			return -1, err.Error(), err
 		}
@@ -189,7 +207,7 @@ func (daemon *Daemon) MigrateVm(podId, targetAddr, netRedirectScript, netRecover
 	return errCode, cause, err
 }
 
-func (daemon *Daemon) redirectNetwork(desIp, netRedirectScript string) (string, error) {
+func (daemon *Daemon) redirectNetwork(desIp, netRedirectScript string) error {
 	/*resp, err := daemon.EtcdKeysAPI.Get(context.Background(), "servers/server1", nil)
 	if err != nil {
 		glog.Errorf("Get origin Host IP failed: %v", err)
@@ -198,18 +216,14 @@ func (daemon *Daemon) redirectNetwork(desIp, netRedirectScript string) (string, 
 	originIp := strings.TrimLeft(resp.Node.Value, "/")
 	daemon.EtcdKeysAPI.Set(context.Background(), "servers/server1", desIp+":1337", nil)
 	*/
-	originIp, err := utils.GetIPOfEth0()
-	if err != nil {
-		return "", err
-	}
 	cmd := fmt.Sprintf("%s %s", netRedirectScript, desIp)
 	command := exec.Command("/bin/sh", "-c", cmd)
 	output, err := command.Output()
 	if err != nil {
 		glog.Error(output)
-		return originIp, err
+		return err
 	}
-	return originIp, nil
+	return nil
 }
 
 func (daemon *Daemon) restoreNetwork(originIp, netRecoverScript string) error {

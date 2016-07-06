@@ -7,9 +7,10 @@ import (
 	"path"
 	"strconv"
 	"strings"
-    "time"
+	"time"
 
 	"github.com/Unknwon/goconfig"
+	etcdClient "github.com/coreos/etcd/client"
 	"github.com/docker/docker/daemon/logger/jsonfilelog"
 	"github.com/hyperhq/hyper/engine"
 	dockertypes "github.com/hyperhq/hyper/lib/docker/api/types"
@@ -23,7 +24,6 @@ import (
 	"github.com/hyperhq/runv/lib/glog"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
-    etcdClient "github.com/coreos/etcd/client"
 )
 
 var (
@@ -66,7 +66,7 @@ type Daemon struct {
 	Storage     Storage
 	Hypervisor  string
 	DefaultLog  *pod.PodLogConfig
-    EtcdKeysAPI etcdClient.KeysAPI
+	EtcdKeysAPI etcdClient.KeysAPI
 }
 
 // Install installs daemon capabilities to eng.
@@ -190,19 +190,19 @@ func NewDaemon(eng *engine.Engine) (*Daemon, error) {
 	return daemon, nil
 }
 
-func initEtcdClient(etcdIp string) (etcdClient.KeysAPI, error){
-    cfg := etcdClient.Config{
-        Endpoints: []string{etcdIp},
-        Transport: etcdClient.DefaultTransport,
-        HeaderTimeoutPerRequest: time.Second,
-    }
-    c, err := etcdClient.New(cfg)
-    if err != nil{
-        glog.Errorf("Init Etcd error: %v", err)
-        return nil, err
-    }
-    kapi := etcdClient.NewKeysAPI(c)
-    return kapi, nil
+func initEtcdClient(etcdIp string) (etcdClient.KeysAPI, error) {
+	cfg := etcdClient.Config{
+		Endpoints:               []string{etcdIp},
+		Transport:               etcdClient.DefaultTransport,
+		HeaderTimeoutPerRequest: time.Second,
+	}
+	c, err := etcdClient.New(cfg)
+	if err != nil {
+		glog.Errorf("Init Etcd error: %v", err)
+		return nil, err
+	}
+	kapi := etcdClient.NewKeysAPI(c)
+	return kapi, nil
 }
 
 func NewDaemonFromDirectory(eng *engine.Engine) (*Daemon, error) {
@@ -239,6 +239,18 @@ func NewDaemonFromDirectory(eng *engine.Engine) (*Daemon, error) {
 	etcdIp, _ := cfg.GetValue(goconfig.DEFAULT_SECTION, "EtcdIp")
 	glog.V(0).Infof("The config: etcdIp=%s", etcdIp)
 
+	localIP, _ := cfg.GetValue("Migration", "LocalIP")
+	glog.V(0).Infof("The config: LocalIP=%s", localIP)
+	MigrationOption.LocalIP = localIP
+
+	networkredirect, _ := cfg.GetValue("Migration", "NetworkRedirectHelper")
+	glog.V(0).Infof("The config: NetworkRedirectHelper=%s", networkredirect)
+	MigrationOption.NetRedirectScript = networkredirect
+
+	networkrecover, _ := cfg.GetValue("Migration", "NetworkRecoverHelper")
+	glog.V(0).Infof("The config: NetworkRecoverHelper=%s", networkrecover)
+	MigrationOption.NetRecoverScript = networkrecover
+
 	var tempdir = path.Join(utils.HYPER_ROOT, "run")
 	os.Setenv("TMPDIR", tempdir)
 	if err := os.MkdirAll(tempdir, 0755); err != nil && !os.IsExist(err) {
@@ -265,11 +277,11 @@ func NewDaemonFromDirectory(eng *engine.Engine) (*Daemon, error) {
 		return nil, err1
 	}
 
-    etcdKeysAPI, err := initEtcdClient(etcdIp)
-    if err != nil{
-        glog.Errorf(err.Error())
-        return nil, err
-    }
+	etcdKeysAPI, err := initEtcdClient(etcdIp)
+	if err != nil {
+		glog.Errorf(err.Error())
+		return nil, err
+	}
 
 	vList := map[string]*hypervisor.Vm{}
 	daemon := &Daemon{
@@ -287,7 +299,7 @@ func NewDaemonFromDirectory(eng *engine.Engine) (*Daemon, error) {
 		Host:        host,
 		BridgeIP:    bridgeip,
 		BridgeIface: biface,
-        EtcdKeysAPI: etcdKeysAPI,
+		EtcdKeysAPI: etcdKeysAPI,
 	}
 
 	// Get the docker daemon info
